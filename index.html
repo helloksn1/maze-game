@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <link rel="stylesheet" href="css/font-awesome.min.css">
+        <script src="jquery.min.js"></script>
+        <style>
+            #container {
+                position: fixed;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: 800px;
+                height: 500px;
+                border: 1px solid black;
+            }
+            #container * {
+                position: absolute;
+            }
+            #maze_pad {
+                width: 420px;
+                height: 420px;
+                left: 190px;
+                top: 40px;
+                border: 1px solid black;
+                background-color: aqua;
+            }
+            .maze-block {
+                width: 60px;
+                height: 60px;
+                background-color: black;
+                border: 1px solid rgb(200, 0, 0);
+            }
+            .load {
+                background-color: rgb(200, 200, 0);
+                width: 20px;
+                height: 20px;
+            }
+            .load-reachable {
+                background-color: rgb(255, 100, 0);
+            }
+            .middle {
+                left: 20px;
+                top: 20px;
+            }
+            .load_0 {
+                left: 0px;
+                top: 20px;
+            }
+            .load_1 {
+                left: 20px;
+                top: 40px;
+            }
+            .load_2 {
+                left: 40px;
+                top: 20px;
+            }
+            .load_3 {
+                left: 20px;
+                top: 0px;
+            }
+            .fa {
+                color: red;
+                font-weight: bold;
+                font-size: 30px;
+            }
+            .player {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                border: 1px solid black;
+            }
+            #player_0, #player_0_state .color, .won-0 {
+                background-color: red;
+            }
+            #player_1, #player_1_state .color, .won-1 {
+                background-color: blue;
+            }
+            #player_2, #player_2_state .color, .won-2 {
+                background-color: green;
+            }
+            #player_3, #player_3_state .color, .won-3 {
+                background-color: white;
+            }
+            .treasure {
+                font-size: 20px;
+                font-weight: bold;
+                color: white;
+            }
+            .color {
+                border-radius: 50%;
+                width: 20px;
+                height: 20px;
+                text-align: center;
+            }
+            .cur-player {
+                border: 3px solid black;
+            }
+            .found-count {
+                left: 30px;
+                top: 2px;
+            }
+            #won_user {
+                width: 100px;
+                height: 100px;
+                top: 200px;
+                left: 20px;
+                border-radius: 50%;
+                border: 5px solid black;
+            }
+            #win_pad {
+                width: 800px;
+                height: 500px;
+                left: 0px;
+                top: 0px;
+                background-color: gray;
+                display: none;
+                color: white;
+                font-size: 100px;
+                z-index: 1000;
+            }
+            #settings_pad {
+                background-color: gray;
+                z-index: 100;
+                width: 800px;
+                height: 500px;
+            }
+            #pad_new_game {
+                bottom: 10px;
+                left: 10px;
+            }
+            #instruction {
+                left: 0px;
+                width: 1000px;
+                bottom: -30px;
+                text-align: center;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="container">
+            <div id="instruction"></div>
+            <div id="settings_pad">
+                <label style="left: 250px; top: 200px;">Player Count:</label>
+                <input style="left: 450px; top: 200px;" type="number" value="2" id="player_count">
+                <label style="left: 250px; top: 230px;">Treasure Count Per Player:</label>
+                <input style="left: 450px; top: 230px;" type="number" value="2" id="tpp_count">
+                <button style="left: 350px; top: 260px;" id="start">Start!</button>
+            </div>
+            <div id="maze_pad">
+
+            </div>
+            <div id="win_pad">
+                <div id="won_user" class="won-0"></div><div style="left: 150px; top: 190px;">won the game!</div>
+                <button style="left: 350px; top: 400px;" id="new_game">New Game</button>
+            </div>
+            <button id="pad_new_game">New Game</button>
+        </div>
+        <script>
+            const STRAIGHT = 0, BEND = 1, T_PIECE = 2;
+            const LEFT = 0, BOTTOM = 1, RIGHT = 2, TOP = 3;
+            const BLOCKTYPE = val => val % 10;
+            const BLOCKANGLE = val => parseInt(val / 10);
+            const MAKEBLOCK = (type, angle) => angle * 10 + type;
+            const MAZE_SIZE = 7;
+            const BLOCK_SIZE = 60;
+
+            let maze_blocks = [], free_block = 0;
+            let treasures = [], tpp_count = 1, free_treasure = -1;
+            let players = [], player_count = 2, cur_player = 0;
+            let loads = [];
+            let mov_loads = [];
+            let player_mov_idx = 0;
+            let movstep = 0;
+            let player_moving = false;
+
+            const initPlayers = () => {
+                players = [
+                    {
+                        x: 0,
+                        y: 0,
+                        cards: [],
+                        cur_card: 0,
+                    },
+                    {
+                        x: MAZE_SIZE - 1,
+                        y: 0,
+                        cards: [],
+                        cur_card: 0,
+                    },
+                    {
+                        x: MAZE_SIZE - 1,
+                        y: MAZE_SIZE - 1,
+                        cards: [],
+                        cur_card: 0
+                    },
+                    {
+                        x: 0,
+                        y: MAZE_SIZE - 1,
+                        cards: [],
+                        cur_card: 0
+                    }
+                ];
+            };
+
+            const load_stats = [
+                [[1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1]], // STRAIGHT
+                [[0, 1, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1], [1, 1, 0, 0]], // BEND
+                [[1, 1, 1, 0], [0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1]] // T_PIECE
+            ];
+
+            const make2DArray = () => {
+                const res = [];
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    const sec = [];
+                    for (let j = 0; j < MAZE_SIZE; j++)
+                        sec.push(-1);
+                    res.push(sec);
+                }
+                return res;
+            };
+
+            const initDOM = () => {
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    for (let j = 0; j < MAZE_SIZE; j++) {
+                        $("#maze_pad").append(`
+                            <div class="maze-block" id="block_${i}_${j}" style="left: ${j * BLOCK_SIZE + 'px'}; top: ${i * BLOCK_SIZE + 'px'};">
+                                <div class="load middle"></div>
+                                <div class="load load_0"></div>
+                                <div class="load load_1"></div>
+                                <div class="load load_2"></div>
+                                <div class="load load_3"></div>
+                            </div>
+                        `);
+                    }
+                }
+                $("#container").append(`
+                    <div class="maze-block" id="free_block" style="left: 700px; top: 50px;">
+                        <div class="load middle"></div>
+                        <div class="load load_0"></div>
+                        <div class="load load_1"></div>
+                        <div class="load load_2"></div>
+                        <div class="load load_3"></div>
+                    </div>
+                `);
+                for (let i = 0; i < 4; i++) {
+                    let dir;
+                    if (i == LEFT) dir = 'right';  else
+                    if (i == BOTTOM) dir = 'up';    else
+                    if (i == RIGHT) dir = 'left';   else
+                    if (i == TOP) dir = 'down';
+                    for (let j = 0; j < 3; j++) {
+                        let left, top;
+                        if (i == LEFT) {
+                            left = -25;
+                            top = BLOCK_SIZE * (1 + j * 2) + 15;
+                        }
+                        else if (i == BOTTOM) {
+                            left = BLOCK_SIZE * (1 + j * 2) + 20;
+                            top = BLOCK_SIZE * MAZE_SIZE;
+                        }
+                        else if (i == RIGHT) {
+                            left = BLOCK_SIZE * MAZE_SIZE + 5;
+                            top = BLOCK_SIZE * (1 + j * 2) + 20;
+                        }
+                        else {
+                            left = BLOCK_SIZE * (1 + j * 2) + 20;
+                            top = -30;
+                        }
+                        $('#container').append(`
+                            <i class="fa fa-arrow-${dir}" style="left: ${left + 190}px; top: ${top + 40}px;" id="arrow_${i}_${j}"></i>
+                        `);
+                    }
+                }
+                for (let i = 0; i < 4; i++) {
+                    $("#container").append(`
+                        <div id="player_${i}" class="player"></div>
+                    `);
+                    $("#container").append(`
+                        <div class="state-pad" id="player_${i}_state" style="top: ${i * 30 + 10}px; left: 10px;">
+                            <div class="color"></div>
+                            <div class="found-count"></div>
+                        </div>
+                    `);
+                }
+                for (let i = 0; i < 24; i++) {
+                    $("#container").append(`
+                        <div id="treasure_${i}" class="treasure">${i + 1}</div>
+                    `);
+                }
+            };
+
+            const initPlayerTreasureDOM = () => {
+                for (let i = 0; i < 4; i++) {
+                    $(`#player_${i}`).css("display", i < player_count ? "block" : "none");
+                    $(`#player_${i}_state`).css("display", i < player_count ? "block" : "none");
+                }
+                for (let i = 0; i < 24; i++)
+                    $(`#treasure_${i}`).css("display", i < tpp_count * player_count ? "block" : "none");
+            };
+
+            const showPlayerState = () => {
+                $(".cur-player").removeClass("cur-player");
+                for (let i = 0; i < player_count; i++) {
+                    if (i == cur_player)
+                        $(`#player_${i}_state .color`).addClass("cur-player");
+                    $(`#player_${i}_state .color`).text(players[i].cards[players[i].cur_card] + 1);
+                    $(`#player_${i}_state .found-count`).text(`${players[i].cur_card}/${tpp_count}`);
+                }
+            }
+
+            const initTreasures = () => {
+                treasures = make2DArray();
+                for (let i = 0; i < tpp_count * player_count; i++) {
+                    while (1) {
+                        const x = parseInt(Math.random() * MAZE_SIZE);
+                        const y = parseInt(Math.random() * MAZE_SIZE);
+                        if (treasures[x][y] != -1) continue;
+                        if ((x == 0 || x == MAZE_SIZE - 1) && (y == 0 || y == MAZE_SIZE - 1)) continue;
+                        treasures[x][y] = i;
+                        $(`#treasure_${i}`).css("left", 190 + BLOCK_SIZE * y + 20 + "px").css("top", 40 + BLOCK_SIZE * x + 20 + "px");
+                        break;
+                    }
+                }
+                let tids = [];
+                for (let i = 0; i < tpp_count * player_count; i++)
+                    tids.push(i);
+                for (let i = 0; i < 1000; i++) {
+                    const idx0 = parseInt(Math.random() * tpp_count * player_count);
+                    const idx1 = parseInt(Math.random() * tpp_count * player_count);
+                    const t = tids[idx0];
+                    tids[idx0] = tids[idx1];
+                    tids[idx1] = t;
+                }
+                for (let i = 0; i < player_count; i++)
+                    for (let j = 0; j < tpp_count; j++)
+                        players[i].cards.push(tids[i * tpp_count + j]);
+            };
+
+            const showTreasures = () => {
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    for (let j = 0; j < MAZE_SIZE; j++) {
+                        if (treasures[i][j] == -1) continue;
+                        $(`#treasure_${treasures[i][j]}`).css("left", 190 + j * BLOCK_SIZE + 20 + "px").css("top", 40 + i * BLOCK_SIZE + 20 + "px");
+                    }
+                }
+                if (free_treasure != -1) {
+                    $(`#treasure_${free_treasure}`).css("left", 700 + 20 + "px").css("top", 50 + 20 + "px");
+                }
+            };
+
+            const showPlayers = () => {
+                const xoff = [0, 10, 10, 0];
+                const yoff = [0, 0, 10, 10];
+                for (let i = 0; i < player_count; i++) {
+                    $(`#player_${i}`).css("left", 190 + players[i].y * BLOCK_SIZE + 20 + xoff[i] + "px").css("top", 40 + players[i].x * BLOCK_SIZE + 20 + yoff[i] + "px");
+                }
+            };
+
+            const initMazeBlocks = () => {
+                maze_blocks = make2DArray();
+                const nomove_blocks = [
+                    MAKEBLOCK(BEND,0),      MAKEBLOCK(T_PIECE,0), MAKEBLOCK(T_PIECE,0), MAKEBLOCK(BEND,3),
+                    MAKEBLOCK(T_PIECE,1),   MAKEBLOCK(T_PIECE,1), MAKEBLOCK(T_PIECE,0), MAKEBLOCK(T_PIECE,3),
+                    MAKEBLOCK(T_PIECE,1),   MAKEBLOCK(T_PIECE,2), MAKEBLOCK(T_PIECE,3), MAKEBLOCK(T_PIECE,3),
+                    MAKEBLOCK(BEND,1),      MAKEBLOCK(T_PIECE,2), MAKEBLOCK(T_PIECE,2), MAKEBLOCK(BEND,2)
+                ];
+
+                let _idx = 0;
+                for (let i = 0; i < MAZE_SIZE; i += 2)
+                    for (let j = 0; j < MAZE_SIZE; j += 2)
+                        maze_blocks[i][j] = nomove_blocks[_idx++];
+                const free_blocks_type = [];
+                for (let i = 0; i < 13; i++)
+                    free_blocks_type.push(STRAIGHT);
+                for (let i = 0; i < 15; i++)
+                    free_blocks_type.push(BEND);
+                for (let i = 0; i < 6; i++)
+                    free_blocks_type.push(T_PIECE);
+                const free_cnt = 34;
+                for (let i = 0; i < 1000; i++) {
+                    const pos0 = parseInt(Math.random() * 34);
+                    const pos1 = parseInt(Math.random() * 34);
+                    const t = free_blocks_type[pos0];
+                    free_blocks_type[pos0] = free_blocks_type[pos1];
+                    free_blocks_type[pos1] = t;
+                }
+                _idx = 0;
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    for (let j = 0; j < MAZE_SIZE; j++) {
+                        if (maze_blocks[i][j] != -1)
+                            continue;
+                        maze_blocks[i][j] = MAKEBLOCK(free_blocks_type[_idx++], parseInt(Math.random() * 4));
+                    }
+                }
+                free_block = free_blocks_type[_idx];
+            }
+
+            const showBlockLoadsOnPos = (block, x, y) => {
+                const id = x >= 0 ? `block_${x}_${y}` : 'free_block';
+                for (let i = 0; i < 4; i++) {
+                    $(`#${id} .load_${i}`).css("visibility", load_stats[BLOCKTYPE(block)][BLOCKANGLE(block)][i] ? "visible" : "hidden");
+                }
+            };
+            const showBlockLoads = () => {
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    for (let j = 0; j < MAZE_SIZE; j++) {
+                        showBlockLoadsOnPos(maze_blocks[i][j], i, j);
+                    }
+                }
+                showBlockLoadsOnPos(free_block, -1, 0);
+            };
+
+            const slide2DArray = (arr, dir, idx, new_val) => {
+                let out;
+                if (dir == LEFT) {
+                    out = arr[1 + idx * 2][MAZE_SIZE - 1];
+                    for (let i = MAZE_SIZE - 1; i > 0; i--)
+                        arr[1 + idx * 2][i] = arr[1 + idx * 2][i - 1];
+                    arr[1 + idx * 2][0] = new_val;
+                }
+                else if (dir == BOTTOM) {
+                    out = arr[0][1 + idx * 2];
+                    for (let i = 0; i < MAZE_SIZE - 1; i++)
+                        arr[i][1 + idx * 2] = arr[i + 1][1 + idx * 2];
+                    arr[MAZE_SIZE - 1][1 + idx * 2] = new_val;
+                }
+                else if (dir == RIGHT) {
+                    out = arr[1 + idx * 2][0];
+                    for (let i = 0; i < MAZE_SIZE - 1; i++)
+                        arr[1 + idx * 2][i] = arr[1 + idx * 2][i + 1];
+                    arr[1 + idx * 2][MAZE_SIZE - 1] = new_val;
+                }
+                else {
+                    out = arr[MAZE_SIZE - 1][1 + idx * 2];
+                    for (let i = MAZE_SIZE - 1; i > 0; i--)
+                        arr[i][1 + idx * 2] = arr[i - 1][1 + idx * 2];
+                    arr[0][1 + idx * 2] = new_val;
+                }
+                return out;
+            };
+            const slideIds = (dir, idx) => {
+                const ids = [];
+                if (dir % 2 == 0) {
+                    for (let i = 0; i < MAZE_SIZE; i++)
+                        ids.push([1 + idx * 2, i]);
+                }
+                else {
+                    for (let i = 0; i < MAZE_SIZE; i++)
+                        ids.push([i, 1 + idx * 2]);
+                }
+                return ids;
+            };
+
+            const showPossibleLoads = () => {
+                $(".load").removeClass("load-reachable");
+                for (let i = 0; i < MAZE_SIZE; i++) {
+                    for (let j = 0; j < MAZE_SIZE; j++) {
+                        if (loads[i][j] != -1) {
+                            $(`#block_${i}_${j} .load`).addClass('load-reachable');
+                        }
+                    }
+                }
+            };
+
+            initDOM();
+            $("#free_block").click(() => {
+                if (movstep != 0) return;
+                free_block = MAKEBLOCK(BLOCKTYPE(free_block), (BLOCKANGLE(free_block) + 1) % 4);
+                showBlockLoads();
+            })
+            $(".fa").click(function() {
+                if (movstep != 0) return;
+                const id = this.id;
+                const dir = parseInt(id[6]);
+                const idx = parseInt(id[8]);
+                let fb_x, fb_y;
+                let mov_x, mov_y;
+                if (dir == LEFT) {
+                    fb_x = -BLOCK_SIZE;
+                    fb_y = BLOCK_SIZE * (idx * 2 + 1);
+                    mov_x = BLOCK_SIZE;
+                    mov_y = 0;
+                }
+                else if (dir == BOTTOM) {
+                    fb_x = BLOCK_SIZE * (idx * 2 + 1);
+                    fb_y = BLOCK_SIZE * MAZE_SIZE;
+                    mov_x = 0;
+                    mov_y = -BLOCK_SIZE;
+                }
+                else if (dir == RIGHT) {
+                    fb_x = BLOCK_SIZE * MAZE_SIZE;
+                    fb_y = BLOCK_SIZE * (idx * 2 + 1);
+                    mov_x = -BLOCK_SIZE;
+                    mov_y = 0;
+                }
+                else {
+                    fb_x = BLOCK_SIZE * (idx * 2 + 1);
+                    fb_y = -BLOCK_SIZE;
+                    mov_x = 0;
+                    mov_y = BLOCK_SIZE;
+                }
+                $("#free_block").css("left", fb_x + 190 + "px").css("top", fb_y + 40 + "px");
+                const movblocks = [$("#free_block")];
+                if (free_treasure != -1) {
+                    $(`#treasure_${free_treasure}`).css("left", fb_x + 190 + 20 + "px").css("top", fb_y + 40 + 20 + "px");
+                    movblocks.push($(`#treasure_${free_treasure}`));
+                }
+                const movids = slideIds(dir, idx);
+                for (let p of movids) {
+                    movblocks.push($(`#block_${p[0]}_${p[1]}`));
+                    if (treasures[p[0]][p[1]] != -1)
+                        movblocks.push($(`#treasure_${treasures[p[0]][p[1]]}`));
+                }
+                for (let i = 0; i < player_count; i++)
+                    for (let p of movids)
+                        if (players[i].x == p[0] && players[i].y == p[1]) {
+                            movblocks.push($(`#player_${i}`));
+                            if (dir == LEFT) players[i].y = (players[i].y + 1) % MAZE_SIZE;
+                            else if (dir == BOTTOM) players[i].x = (players[i].x + MAZE_SIZE - 1) % MAZE_SIZE;
+                            else if (dir == RIGHT) players[i].y = (players[i].y + MAZE_SIZE - 1) % MAZE_SIZE;
+                            else players[i].x = (players[i].x + 1) % MAZE_SIZE;
+                            break;
+                        }
+                setTimeout(() => {
+                    for (let ele of movblocks) {
+                        ele.css("transition", ".5s").css("transform", `translate(${mov_x}px, ${mov_y}px)`);
+                    }
+                    setTimeout(() => {
+                        let new_free_block;
+                        let out = slide2DArray(maze_blocks, dir, idx, free_block);
+                        free_block = out;
+                        out = slide2DArray(treasures, dir, idx, free_treasure);
+                        free_treasure = out;
+                        $("#free_block").css("left", "700px").css("top", "50px");
+                        showBlockLoads();
+                        showTreasures();
+                        for (let ele of movblocks) {
+                            ele.css("transition", "0s").css("transform", `translate(0px, 0px)`);
+                        }
+                        loads = findPossibleLoads(players[cur_player].x, players[cur_player].y);
+                        showPossibleLoads();
+                        showPlayers();
+                        movstep = 1;
+                        showInstruction();
+                    }, 600);
+                }, 100);
+                showInstruction();
+            });
+
+            const findPossibleLoads = (x, y) => {
+                const vis = make2DArray();
+                vis[x][y] = { x: -1, y: -1 };
+                const xoff = [0, 1, 0, -1];
+                const yoff = [-1, 0, 1, 0];
+                const bks = [{ x, y }];
+                let ln = 1;
+                for (let i = 0; i < ln; i++) {
+                    x = bks[i].x;
+                    y = bks[i].y;
+                    for (let j = 0; j < 4; j++) {
+                        if ($(`#block_${x}_${y} .load_${j}`).css("visibility") == "hidden")
+                            continue;
+                        const cur_x = x + xoff[j];
+                        const cur_y = y + yoff[j];
+                        if (cur_x < 0 || cur_x >= MAZE_SIZE) continue;
+                        if (cur_y < 0 || cur_y >= MAZE_SIZE) continue;
+                        if (vis[cur_x][cur_y] != -1) continue;
+                        if ($(`#block_${cur_x}_${cur_y} .load_${(j + 2) % 4}`).css("visibility") == "hidden")
+                            continue;
+                        vis[cur_x][cur_y] = bks[i];
+                        bks.push({ x: cur_x, y: cur_y })
+                        ln++;
+                    }
+                }
+                return vis;
+            };
+
+            const showInstruction = () => {
+                if (movstep == 0) {
+                    $("#instruction").text("Left click on the extra block to rotate it, and then click on the arrows to add it.");
+                }
+                else {
+                    if (player_moving) {
+                        $("#instruction").text("moving...");
+                    }
+                    else
+                        $("#instruction").text("Click one of the highlighted rooms to move to it.");
+                }
+            };
+
+            const startGame = () => {
+                player_count = parseInt($("#player_count").val());
+                tpp_count = parseInt($("#tpp_count").val());
+                $("#settings_pad").css("display", "none");
+                cur_player = 0;
+                initPlayers();
+                initTreasures();
+                initMazeBlocks();
+                initPlayerTreasureDOM();
+                showBlockLoads();
+                showPlayers();
+                showTreasures();
+                showPlayerState();
+                showInstruction();
+            }
+
+            const newGame = () => {
+                $("#win_pad").css("display", "none");
+                $("#settings_pad").css("display", "block");
+                $("#instruction").text("");
+            };
+
+            const playerMoving = () => {
+                if (player_mov_idx == mov_loads.length) {
+                    $(`#player_${cur_player}`).css("transition", "0s").css("transform", "translate(0px, 0px)");
+                    if (mov_loads.length) {
+                        players[cur_player].x = mov_loads[mov_loads.length - 1].x;
+                        players[cur_player].y = mov_loads[mov_loads.length - 1].y;
+                    }
+                    if (players[cur_player].cur_card == players[cur_player].cards.length) {
+                        $("#instruction").text("");
+                        $("#win_pad").css("display", "block");
+                        $("#won_user").attr("class", `won-${cur_player}`);
+                    }
+                    cur_player = (cur_player + 1) % player_count;
+                    $(".load").removeClass("load-reachable");
+                    showPlayers();
+                    movstep = 0;
+                    player_moving = false;
+                    showPlayerState();
+                    showInstruction();
+                }
+                else {
+                    player_moving = true;
+                    showInstruction();
+                    const cur_x = mov_loads[player_mov_idx].x;
+                    const cur_y = mov_loads[player_mov_idx].y;
+                    const left_off = (cur_y - players[cur_player].y) * BLOCK_SIZE;
+                    const top_off = (cur_x - players[cur_player].x) * BLOCK_SIZE;
+                    $(`#player_${cur_player}`).css("transform", `translate(${left_off}px, ${top_off}px)`);
+                    setTimeout(() => {
+                        console.log(treasures);
+                        console.log(players[cur_player].cards[players[cur_player].cur_card], treasures[cur_x][cur_y]);
+                        if (players[cur_player].cards[players[cur_player].cur_card] == treasures[cur_x][cur_y]) {
+                            $(`#treasure_${treasures[cur_x][cur_y]}`).css("display", "none");
+                            players[cur_player].cur_card++;
+                        }
+                        player_mov_idx++;
+                        playerMoving();
+                    }, 500);
+                }
+            };
+
+            $(".maze-block").click(function() {
+                if (player_moving) return;
+                const id = this.id;
+                if (id == "free_block") return;
+                if (movstep != 1) return;
+                const x = parseInt(id[6]);
+                const y = parseFloat(id[8]);
+                if (loads[x][y] == -1) return;
+                mov_loads = [];
+                let cur_x = x, cur_y = y;
+                while (cur_x != players[cur_player].x || cur_y != players[cur_player].y) {
+                    mov_loads.push({ x: cur_x, y: cur_y });
+                    const n = loads[cur_x][cur_y];
+                    cur_x = n.x;
+                    cur_y = n.y;
+                }
+                mov_loads.reverse();
+                player_mov_idx = 0;
+                $(`#player_${cur_player}`).css("transition", ".5s").css("transition-timing-function", "linear");
+                playerMoving();
+            });
+
+            $("#new_game").click(newGame);
+            $("#pad_new_game").click(newGame);
+
+            $("#start").click(startGame);
+        </script>
+    </body>
+</html>
